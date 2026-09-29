@@ -1,7 +1,10 @@
-const storageKey = 'studentPulseClasses';
-const starterClasses = [{ id: 'demo', course: 'BSCS', year: '3rd Year', section: 'A', subjects: ['Data Structures', 'Web Development', 'Database Systems', 'Discrete Mathematics'], students: [{ name: 'Jordan Davis', initials: 'JD', assessments: [] }, { name: 'Maria Santos', initials: 'MS', assessments: [] }, { name: 'Ethan Reyes', initials: 'ER', assessments: [] }] }];
-let classes = JSON.parse(localStorage.getItem(storageKey) || 'null') || starterClasses;
-let activeClass = classes[0];
+let storageKey = 'studentPulseClasses';
+const legacyDemoClass = { id: 'demo', course: 'BSCS', year: '3rd Year', section: 'A', subjects: ['Data Structures', 'Web Development', 'Database Systems', 'Discrete Mathematics'], students: [{ name: 'Jordan Davis' }, { name: 'Maria Santos' }, { name: 'Ethan Reyes' }] };
+const emptyClass = { id: 'empty', course: 'No class selected', year: '', section: '', subjects: [], students: [] };
+let classes = JSON.parse(localStorage.getItem(storageKey) || '[]') || [];
+let currentUser = null;
+let authMode = 'signin';
+let activeClass = classes[0] || emptyClass;
 let selectedStudent = activeClass.students[0] || null;
 let pendingSubjects = [];
 let editingClassId = null;
@@ -26,39 +29,145 @@ const toast = $('#toast');
 
 function saveClasses() {
   localStorage.setItem(storageKey, JSON.stringify(classes));
-  if (window.studentPulseFirebase?.saveStudentPulseClasses) {
-    window.studentPulseFirebase.saveStudentPulseClasses(classes).catch(() => showToast('Saved locally. Firebase rules still need setup.'));
+  if (currentUser && window.studentPulseFirebase?.saveStudentPulseClasses) {
+    window.studentPulseFirebase.saveStudentPulseClasses(currentUser.uid, classes).catch((error) => reportFirebaseError('save', error));
   }
 }
 
 function syncClassesToFirebase() {
-  if (window.studentPulseFirebase?.saveStudentPulseClasses) {
-    window.studentPulseFirebase.saveStudentPulseClasses(classes).catch(() => showToast('Saved locally. Firebase rules still need setup.'));
+  if (currentUser && window.studentPulseFirebase?.saveStudentPulseClasses) {
+    window.studentPulseFirebase.saveStudentPulseClasses(currentUser.uid, classes).catch((error) => reportFirebaseError('save', error));
   }
 }
 
-async function loadClassesFromFirebase() {
-  if (!window.studentPulseFirebase?.loadStudentPulseClasses) return;
+function isUntouchedLegacyDemo(item) {
+  const studentInitials = new Map([['Jordan Davis', 'JD'], ['Maria Santos', 'MS'], ['Ethan Reyes', 'ER']]);
+  const students = item?.students || [];
+  return item?.id === legacyDemoClass.id
+    && item.course === legacyDemoClass.course
+    && item.year === legacyDemoClass.year
+    && item.section === legacyDemoClass.section
+    && !item.teacher
+    && JSON.stringify(item.subjects || []) === JSON.stringify(legacyDemoClass.subjects)
+    && students.length === legacyDemoClass.students.length
+    && new Set(students.map((student) => student.name)).size === legacyDemoClass.students.length
+    && students.every((student) => studentInitials.has(student.name)
+      && (!student.surname || student.surname === '')
+      && (!student.middleName || student.middleName === '')
+      && (student.displayName || student.name) === student.name
+      && (!student.studentNumber || student.studentNumber === 'No middle name')
+      && (student.gender || 'Male') === 'Male'
+      && (student.initials || studentInitials.get(student.name)) === studentInitials.get(student.name)
+      && !(student.assessments || []).length);
+}
+
+function reportFirebaseError(operation, error) {
+  console.error(`Firebase ${operation} failed:`, error);
+  const code = error?.code || 'unknown-error';
+  showToast(`Firebase ${operation} failed (${code}). Data is only saved in this browser.`);
+}
+
+function getAuthErrorMessage(error) {
+  const messages = {
+    'auth/email-already-in-use': 'An account with this email already exists. Sign in or use a different email.',
+    'auth/invalid-credential': 'Incorrect email or password. Please try again.',
+    'auth/wrong-password': 'Incorrect email or password. Please try again.',
+    'auth/user-not-found': 'No account was found for this email. Create an account first.',
+    'auth/invalid-email': 'Enter a valid email address.',
+    'auth/weak-password': 'Choose a password with at least 6 characters.',
+    'auth/too-many-requests': 'Too many attempts. Please try again later.',
+    'auth/network-request-failed': 'Could not connect to the server. Check your internet connection and try again.',
+    'auth/operation-not-allowed': 'Email and password sign-in is not enabled for this Firebase project.',
+    'auth/configuration-not-found': 'Authentication is not configured for this Firebase project. Check the project settings and enabled sign-in provider.'
+  };
+  return messages[error?.code] || 'Something went wrong. Please try again.';
+}
+
+function setAuthMode(mode) {
+  authMode = mode;
+  const isSignIn = mode === 'signin';
+  $('#authTitle').textContent = isSignIn ? 'Welcome back' : 'Create your account';
+  $('#authDescription').textContent = isSignIn ? 'Sign in to open your classes and reports.' : 'Use the same account on each device to sync your data.';
+  $('#authSubmit').textContent = isSignIn ? 'Sign in' : 'Create account';
+  $('#authModeToggle').textContent = isSignIn ? 'Create an account' : 'Back to sign in';
+  $('#authPassword').autocomplete = isSignIn ? 'current-password' : 'new-password';
+  $('#authSignupFields').hidden = isSignIn;
+  $('#authGivenName').required = !isSignIn;
+  $('#authSurname').required = !isSignIn;
+  $('#authMessage').textContent = '';
+}
+
+async function initializeAuthenticatedApp(user) {
+  currentUser = user || null;
+  if (!currentUser) {
+    $('#appShell').hidden = true;
+    $('#authView').hidden = false;
+    return;
+  }
+
+  $('#authView').hidden = true;
+  $('#appShell').hidden = true;
+  $('#accountEmail').textContent = currentUser.email || '';
+  storageKey = `studentPulseClasses:${currentUser.uid}`;
+  let localClasses = localStorage.getItem(storageKey);
+  const legacyLocalClasses = localStorage.getItem('studentPulseClasses');
+  if (!localClasses && legacyLocalClasses) {
+    localClasses = legacyLocalClasses;
+    localStorage.setItem(storageKey, localClasses);
+  }
+  if (legacyLocalClasses) localStorage.removeItem('studentPulseClasses');
+  classes = (JSON.parse(localClasses || '[]') || []).filter((item) => !isUntouchedLegacyDemo(item));
+
   try {
-    const remoteClasses = await window.studentPulseFirebase.loadStudentPulseClasses();
-    if (!Array.isArray(remoteClasses) || !remoteClasses.length) { syncClassesToFirebase(); return; }
-    classes = remoteClasses;
-    activeClass = classes[0];
-    selectedStudent = activeClass.students[0] || null;
-    localStorage.setItem(storageKey, JSON.stringify(classes));
-    await window.studentPulseFirebase.saveStudentPulseClasses(classes);
-    renderClassOptions();
-    $('#activeClassBannerName').textContent = classLabel(activeClass);
-    renderSubjects();
-    renderStudentSelect();
-    renderReports();
+    const remoteClasses = await window.studentPulseFirebase.loadStudentPulseClasses(currentUser.uid);
+    if (Array.isArray(remoteClasses)) {
+      classes = remoteClasses.filter((item) => !isUntouchedLegacyDemo(item));
+      if (classes.length !== remoteClasses.length) await window.studentPulseFirebase.saveStudentPulseClasses(currentUser.uid, classes);
+    } else if (classes.length) await window.studentPulseFirebase.saveStudentPulseClasses(currentUser.uid, classes);
   } catch (error) {
-    showToast('Using local saved data. Firebase rules still need setup.');
+    reportFirebaseError('load', error);
   }
+  localStorage.setItem(storageKey, JSON.stringify(classes));
+  activeClass = classes[0] || emptyClass;
+  selectedStudent = activeClass.students[0] || null;
+  refreshActiveClassViews();
+  $('#appShell').hidden = false;
 }
 
-window.addEventListener('studentpulse:firebase-ready', loadClassesFromFirebase);
-function classLabel(item) { return `${item.course} · ${item.year} · Section ${item.section}`; }
+window.addEventListener('studentpulse:firebase-ready', () => {
+  window.studentPulseFirebase.onAuthStateChanged(initializeAuthenticatedApp, (error) => {
+    $('#authMessage').textContent = getAuthErrorMessage(error);
+  });
+});
+$('#authForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const submitButton = $('#authSubmit');
+  submitButton.disabled = true;
+  $('#authMessage').textContent = '';
+  try {
+    const email = $('#authEmail').value.trim();
+    const password = $('#authPassword').value;
+    if (authMode === 'signup') {
+      const givenName = $('#authGivenName').value.trim();
+      const surname = $('#authSurname').value.trim();
+      if (!givenName || !surname) throw new Error('Enter the teacher’s given name and surname.');
+      await window.studentPulseFirebase.createAccount(email, password, givenName, surname);
+    } else await window.studentPulseFirebase.signIn(email, password);
+  } catch (error) {
+    $('#authMessage').textContent = getAuthErrorMessage(error);
+  } finally {
+    submitButton.disabled = false;
+  }
+});
+$('#authForm').addEventListener('input', () => { $('#authMessage').textContent = ''; });
+$('#authModeToggle').addEventListener('click', () => setAuthMode(authMode === 'signin' ? 'signup' : 'signin'));
+$('#signOutButton').addEventListener('click', async () => {
+  if (!window.confirm('Are you sure you want to sign out?')) return;
+  setMobileMenu(false);
+  try { await window.studentPulseFirebase.signOut(); }
+  catch (error) { showToast(getAuthErrorMessage(error)); }
+});
+function classLabel(item) { return item.id === 'empty' ? 'No class selected' : `${item.course} · ${item.year} · Section ${item.section}`; }
 function showToast(message) { toast.textContent = message; toast.classList.add('show'); clearTimeout(window.toastTimer); window.toastTimer = setTimeout(() => toast.classList.remove('show'), 2600); }
 function initials(name) { return name.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase(); }
 function getStudentInitials(student) {
@@ -300,7 +409,8 @@ function createGradebookWorkbook(subject, assessments) {
   rows.push(titleRow);
   const subjectRow = blankRow();
   subjectRow[0] = makeCell('Subject', 2); subjectRow[1] = makeCell(subject, 3);
-  subjectRow[3] = makeCell('Teacher', 2); subjectRow[4] = makeCell(activeClass.teacher?.trim() || 'Not specified', 3);
+  const teacherName = currentUser?.displayName?.trim() || activeClass.teacher?.trim() || 'Not specified';
+  subjectRow[3] = makeCell('Teacher', 2); subjectRow[4] = makeCell(teacherName, 3);
   rows.push(subjectRow);
   const courseRow = blankRow();
   courseRow[0] = makeCell('Course / Program', 2); courseRow[1] = makeCell(activeClass.course || 'Not specified', 3);
@@ -479,12 +589,12 @@ function normalizePeriod(value) {
 }
 function getPeriodLabel(value) { return PERIOD_LABELS[normalizePeriod(value)] || titleCase(String(value || 'Semester')); }
 classes = classes.map((item) => ({ ...item, course: formatCourse(item.course), section: item.section.toUpperCase(), subjects: item.subjects.map((subject) => titleCase(subject)), students: item.students.map((student) => { const name = formatStudentName(student.name); const surname = formatSurname(student.surname || ''); const middleName = student.middleName ? formatStudentName(student.middleName) : (student.studentNumber ? formatStudentName(student.studentNumber) : ''); const gender = student.gender || 'Male'; const displayName = student.displayName || (surname ? `${surname}, ${name}` : name); return { ...student, name, surname, middleName, gender, displayName, studentNumber: student.studentNumber || middleName || 'No middle name', initials: student.initials || getStudentInitials({ ...student, displayName, name, surname }), assessments: student.assessments || [] }; }) }));
-localStorage.setItem(storageKey, JSON.stringify(classes));
-
 function renderClassOptions() {
-  $('#classSelect').innerHTML = classes.map((item) => `<option value="${item.id}">${classLabel(item)}</option>`).join('');
+  $('#classSelect').innerHTML = classes.length ? classes.map((item) => `<option value="${item.id}">${classLabel(item)}</option>`).join('') : '<option value="empty">No classes yet</option>';
+  $('#classSelect').disabled = classes.length === 0;
   $('#classSelect').value = activeClass.id;
-  $('#reportClassSelect').innerHTML = classes.map((item) => `<option value="${item.id}">${classLabel(item)}</option>`).join('');
+  $('#reportClassSelect').innerHTML = classes.length ? classes.map((item) => `<option value="${item.id}">${classLabel(item)}</option>`).join('') : '<option value="empty">No classes yet</option>';
+  $('#reportClassSelect').disabled = classes.length === 0;
   $('#reportClassSelect').value = activeClass.id;
   renderClassCards();
 }
@@ -637,9 +747,13 @@ function renderAssessmentStudentSelect(student = selectedStudent) {
 }
 
 function renderStudentSelect() {
-  $('#studentStrip').hidden = activeClass.students.length === 0;
-  $('#classEmptyPanel').hidden = activeClass.students.length > 0;
-  $('#rosterPanel').hidden = activeClass.students.length === 0;
+  const hasClass = classes.length > 0;
+  document.querySelectorAll('#overviewView > *').forEach((section) => { section.hidden = hasClass ? section.id === 'noClassesPanel' : section.id !== 'noClassesPanel'; });
+  document.querySelector('.active-class-banner').hidden = !hasClass;
+  document.querySelector('.class-picker-strip').hidden = !hasClass;
+  $('#studentStrip').hidden = !hasClass || activeClass.students.length === 0;
+  $('#classEmptyPanel').hidden = !hasClass || activeClass.students.length > 0;
+  $('#rosterPanel').hidden = !hasClass || activeClass.students.length === 0;
   $('#activeClassBannerMeta').textContent = `${activeClass.subjects.length} subjects · ${activeClass.students.length} students tracked`;
   $('#studentClassContext').textContent = `Adding to ${classLabel(activeClass)}`;
   $('#studentSelect').innerHTML = sortStudentsAlphabetically(activeClass.students).map((student) => `<option value="${student.name}">${student.displayName || student.name}</option>`).join('');
@@ -807,14 +921,20 @@ function renderTopStudents() {
 }
 
 function renderSelectedStudent() {
-  if (!selectedStudent) return;
-  $('#studentSelect').value = selectedStudent.name;
-  $('.avatar-large').textContent = selectedStudent.initials;
-  $('.student-name').innerHTML = `${selectedStudent.name} <span class="verified">✓</span>`;
-  $('#selectedStudentMeta').textContent = classLabel(activeClass);
-  const average = Math.round(getStudentAverage(selectedStudent));
-  $('.kpi-value').innerHTML = `${average}<span class="unit">%</span>`;
-  $('.progress-line span').style.width = `${average}%`;
+  if (selectedStudent) {
+    $('#studentSelect').value = selectedStudent.name;
+    $('.avatar-large').textContent = selectedStudent.initials;
+    $('.student-name').innerHTML = `${selectedStudent.name} <span class="verified">✓</span>`;
+    $('#selectedStudentMeta').textContent = classLabel(activeClass);
+  }
+  const assessmentCount = selectedStudent ? getUniqueAssessments(selectedStudent.assessments).length : 0;
+  const average = assessmentCount ? Math.round(getStudentAverage(selectedStudent)) : null;
+  $('#overallAverageValue').textContent = average === null ? '—' : String(average);
+  $('#overallAverageUnit').hidden = average === null;
+  $('#overallAverageProgress').style.width = `${average ?? 0}%`;
+  $('#overallAverageFootnote').textContent = average === null
+    ? selectedStudent ? 'No assessment scores recorded yet.' : 'Select a student to view an average.'
+    : `${assessmentCount} recorded assessment${assessmentCount === 1 ? '' : 's'}`;
   renderAssessmentRows();
   renderTrendChart();
 }
@@ -1175,6 +1295,7 @@ function openClassForm(classToEdit = null) {
   $('#subjectChips').innerHTML = pendingSubjects.map((subject) => `<span class="subject-chip">${subject}<button type="button" data-subject="${subject}">×</button></span>`).join('');
   classModalBackdrop.hidden = false;
 }
+$('#openFirstClass').addEventListener('click', () => openClassForm());
 function configureClassTeacherField() {
   const subjectsLabel = $('#subjectChips')?.closest('label');
   if (!subjectsLabel || $('#classForm').elements.teacher) return;

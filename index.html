@@ -9,13 +9,14 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600;700&family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="auth.css" />
   <link rel="stylesheet" href="class-summary.css" />
   <link rel="stylesheet" href="overview-completion.css" />
   <link rel="stylesheet" href="class-workflow.css" />
   <link rel="stylesheet" href="assessment-edits.css" />
   <link rel="stylesheet" href="class-reports.css" />
   <link rel="stylesheet" href="report-analytics.css" />
-  <script type="module" src="firebase-init.js?v=cleanup-legacy-7"></script>
+  <script type="module" src="firebase-init.js?v=persistent-account-auth-1"></script>
   <link rel="stylesheet" href="layout-fixes.css" />
   <link rel="stylesheet" href="student-actions.css" />
   <link rel="stylesheet" href="recommendations.css" />
@@ -23,7 +24,30 @@
   <style>.top-students-panel{margin-top:14px;padding-bottom:14px}.class-badge{font-size:9px;letter-spacing:1px;color:var(--cyan);background:#173233;border:1px solid #245b5a;border-radius:20px;padding:6px 9px}.top-students-list{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:16px}.top-student{position:relative;border:1px solid var(--border);background:#0d1319;color:var(--text);border-radius:7px;padding:10px 26px 10px 12px;display:flex;align-items:center;gap:8px;text-align:left;min-width:0}.top-student:hover{border-color:var(--cyan);background:#131d23}.rank{position:absolute;top:8px;right:8px;left:auto;width:16px;height:16px;border-radius:50%;display:grid;place-items:center;font:600 9px 'Space Grotesk';color:#0d1319;background:#677482;flex-shrink:0;line-height:1}.rank-one{border-color:#66552c;background:#171812}.rank-one .rank{background:#f5c85b}.rank-one .top-avatar{background:#f5c85b}.rank-two .rank{background:#b6c1ce}.rank-two .top-avatar{background:#a5b4ff}.rank-three .rank{background:#b7794d}.rank-three .top-avatar{background:#83d4ff}.top-avatar{width:26px;height:26px;font-size:9px;flex-shrink:0;background:#9b8cff;color:#fff;border-radius:50%;display:grid;place-items:center;font-weight:700;margin-left:0}.top-student-copy{min-width:0;flex:1;display:flex;flex-direction:column;justify-content:center;padding-left:2px}.top-student-copy strong{display:block;font-size:10px;line-height:1.25;white-space:normal;overflow-wrap:anywhere;word-break:break-word;letter-spacing:0.1px}.top-student-copy small{display:block;color:var(--muted);font-size:8.5px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.top-score{font:600 13px 'Space Grotesk';color:var(--cyan);white-space:nowrap;flex-shrink:0}.top-arrow{color:#677482;font-size:15px;flex-shrink:0}@media(max-width:720px){.top-students-list{grid-template-columns:1fr}.class-badge{display:none}.top-student{padding:11px}}</style>
 </head>
 <body>
-  <div class="app-shell">
+  <main class="auth-screen" id="authView">
+    <section class="auth-panel" aria-labelledby="authTitle">
+      <div class="auth-brand"><span class="brand-mark">P</span><span>Progress Tracking System</span></div>
+      <p class="eyebrow">SECURE WORKSPACE</p>
+      <h1 id="authTitle">Welcome back</h1>
+      <p class="auth-description" id="authDescription">Sign in to open your classes and reports.</p>
+      <form id="authForm">
+        <div class="auth-signup-fields" id="authSignupFields" hidden>
+          <label for="authGivenName">Given name</label>
+          <input id="authGivenName" name="givenName" type="text" autocomplete="given-name" />
+          <label for="authSurname">Surname</label>
+          <input id="authSurname" name="surname" type="text" autocomplete="family-name" />
+        </div>
+        <label for="authEmail">Email address</label>
+        <input id="authEmail" name="email" type="email" autocomplete="email" required />
+        <label for="authPassword">Password</label>
+        <input id="authPassword" name="password" type="password" autocomplete="current-password" minlength="6" required />
+        <p class="auth-message" id="authMessage" role="status" aria-live="polite"></p>
+        <button class="auth-submit" id="authSubmit" type="submit">Sign in</button>
+      </form>
+      <button class="auth-mode-toggle" id="authModeToggle" type="button">Create an account</button>
+    </section>
+  </main>
+  <div class="app-shell" id="appShell" hidden>
     <aside class="sidebar">
       <div class="brand"><span class="brand-mark">P</span><span class="brand-name">Progress Tracking System</span></div>
       <button class="mobile-menu-toggle" id="mobileMenuToggle" type="button" aria-label="Open menu" aria-controls="mainNavigation" aria-expanded="false"><span class="mobile-menu-icon"><i></i><i></i><i></i></span><span class="mobile-menu-toggle-label">MENU</span></button>
@@ -32,6 +56,8 @@
         <button class="nav-item active" data-view="overview" data-label="Class overview"><span class="nav-icon">▦</span><span class="nav-label">Class overview</span></button>
         <button class="nav-item" data-view="class-maker" data-label="Make class"><span class="nav-icon">＋</span><span class="nav-label">Make class</span></button>
         <button class="nav-item" data-view="reports" data-label="Class reports"><span class="nav-icon">⌁</span><span class="nav-label">Class reports</span></button>
+        <div class="account-menu-profile"><span class="account-menu-email" id="accountEmail"></span></div>
+        <button class="nav-item account-signout-item" id="signOutButton" type="button"><span class="nav-icon" aria-hidden="true">↪</span><span class="nav-label">Sign out</span></button>
       </nav>
     </aside>
     <button class="mobile-menu-overlay" id="mobileMenuOverlay" type="button" aria-label="Close menu"></button>
@@ -51,10 +77,11 @@
       <section id="reportsView" class="reports-view" hidden><div class="reports-header"><div><p class="eyebrow">CLASS REPORT</p><h2>Performance report</h2><p class="muted">A consolidated view of the selected class.</p></div><div class="report-class-picker"><label for="reportClassSelect">Class</label><select id="reportClassSelect"></select></div></div><section class="report-active-card"><div><span class="muted small-label">REPORTING CLASS</span><h3 id="reportClassName">BSCS · 3rd Year · Section A</h3><p class="muted" id="reportClassMeta">4 subjects · 3 students</p></div><span class="report-status">● UPDATED LIVE</span></section><section class="report-metrics" id="reportMetrics"></section><section class="report-analytics"><article class="panel report-trend-panel"><div class="panel-heading"><div><h2>Performance trend</h2><p class="muted" id="reportTrendLabel">Whole class score over time</p></div><div class="legend"><select id="reportTrendRange"><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="overall" selected>Overall</option></select><select id="reportTrendPeriod" aria-label="Academic period"><option value="overall" selected>Semester</option><option value="prelim">Prelim</option><option value="midterm">Midterm</option><option value="semifinal">Semi Finals</option><option value="final">Finals</option></select></div></div><div class="chart-wrap"><canvas id="reportTrendChart" aria-label="Class performance trend chart"></canvas><div class="chart-empty" id="reportChartEmpty">No assessment data yet</div></div></article><article class="panel report-subject-panel"><div class="panel-heading"><div><h2>Subject performance</h2><p class="muted" id="reportSubjectLabel">Whole class average by subject</p></div><div class="report-subject-menu"><button class="more-button" id="reportSubjectMenu" type="button" aria-label="Choose academic period">•••</button><select id="reportSubjectPeriod" class="report-period-menu" aria-label="Academic period"><option value="overall" selected>Semester</option><option value="prelim">Prelim</option><option value="midterm">Midterm</option><option value="semifinal">Semi Finals</option><option value="final">Finals</option></select></div></div><div id="reportSubjects"></div></article></section><section class="report-grid"><article class="panel report-completion-panel"><div class="panel-heading"><div><h2>Assessment completion</h2><p class="muted">Recorded assessments by student</p></div></div><div id="reportCompletion"></div></article></section><article class="panel report-ranking-panel"><div class="panel-heading"><div><h2>Top 3 outstanding students</h2><p class="muted">Ranked by assessment average</p></div></div><div class="report-ranking-list" id="reportRanking"></div></article></section>
 
       <div id="overviewView" class="view-panel">
+        <section class="panel class-empty-panel no-classes-panel" id="noClassesPanel" hidden><div class="empty-icon">＋</div><h2>Start with your first class</h2><p class="muted">Create a class to add students and record assessments.</p><button class="primary-button" id="openFirstClass" type="button">Create class</button></section>
         <section class="kpi-grid">
-          <article class="kpi-card"><div class="kpi-top"><span class="kpi-label">Overall average</span><span class="trend up">↗ 4.8%</span></div><div class="kpi-value">87.4<span class="unit">%</span></div><div class="progress-line"><span style="width:87.4%"></span></div><p class="muted footnote">Above class average <strong>82.1%</strong></p></article>
+          <article class="kpi-card"><div class="kpi-top"><span class="kpi-label">Overall average</span></div><div class="kpi-value"><span id="overallAverageValue">—</span><span class="unit" id="overallAverageUnit" hidden>%</span></div><div class="progress-line"><span id="overallAverageProgress" style="width:0%"></span></div><p class="muted footnote" id="overallAverageFootnote">No assessment scores recorded yet.</p></article>
           <article class="kpi-card assessment-completion-card"><div class="kpi-top"><span class="kpi-label">Assessments completed</span><span class="mini-icon green">✓</span></div><label class="completion-subject-label" for="completionSubjectFilter">Subject<select id="completionSubjectFilter"><option value="all">All subjects</option></select></label><div class="kpi-value" id="completionValue">0</div><p class="muted footnote" id="completionFootnote">Total assessments: 0 · Expected submissions: 0</p><button class="completion-download-button" id="downloadSubjectRecord" type="button" disabled>Download subject record</button></article>
-          <article class="kpi-card"><div class="kpi-top"><span class="kpi-label">Current streak</span><span class="mini-icon orange">✦</span></div><div class="kpi-value">6 <span class="streak-label">weeks</span></div><p class="muted footnote">Personal best <strong>8 weeks</strong></p><div class="sparkline"><span style="height:35%"></span><span style="height:50%"></span><span style="height:42%"></span><span style="height:66%"></span><span style="height:61%"></span><span style="height:79%"></span><span style="height:92%"></span></div></article>
+          <article class="kpi-card"><div class="kpi-top"><span class="kpi-label">Current streak</span><span class="mini-icon orange">✦</span></div><div class="kpi-value">—</div><p class="muted footnote">Streak tracking is not available yet.</p></article>
           <article class="kpi-card attention-card"><div class="kpi-top"><span class="kpi-label">Needs attention</span><span class="mini-icon red">!</span></div><div class="kpi-value" id="attentionCount">0 <span class="streak-label">subjects</span></div><p class="muted footnote" id="attentionSubjects">Based on selected student</p><button class="text-button" id="openRecommendations">See recommendations <span>→</span></button></article>
         </section>
 
@@ -80,6 +107,6 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
   <div class="modal-backdrop" id="studentModalBackdrop" hidden><div class="modal"><div class="modal-head"><div><p class="eyebrow">CLASS ROSTER</p><h2 id="studentModalTitle">Add student</h2></div><div class="modal-head-actions"><button type="button" class="outline-button back-button" id="studentBackButton">Back</button><button class="close-button" id="closeStudentModal">×</button></div></div><form id="studentForm"><div class="form-grid"><label>Given name<input required name="name" placeholder="e.g. Ana Maria" /></label><label>Surname<input required name="surname" placeholder="e.g. Garcia" /></label></div><div class="form-grid"><label>Middle name<input name="middleName" placeholder="e.g. Santos" /></label><label>Gender<select name="gender"><option value="Male">Male</option><option value="Female">Female</option></select></label></div><p class="form-context" id="studentClassContext">Adding to BSCS · 3rd Year · Section A</p><div class="form-actions"><button class="primary-button" id="saveStudentButton" type="submit">Add student</button><button class="outline-button danger-button" id="deleteStudentButton" type="button" hidden>Delete</button></div></form></div></div>
   <div class="modal-backdrop" id="classModalBackdrop" hidden><div class="modal"><div class="modal-head"><div><p class="eyebrow">CLASS SETUP</p><h2 id="classModalTitle">Create class</h2></div><button class="close-button" id="closeClassModal">×</button></div><form id="classForm"><label>Course / Program<input required name="course" placeholder="e.g. BS Computer Science" /></label><div class="form-grid"><label>Year level<select name="year"><option>1st Year</option><option>2nd Year</option><option selected>3rd Year</option><option>4th Year</option><option>5th Year</option></select></label><label>Section<input required name="section" placeholder="e.g. A" /></label></div><label>Subjects <span class="label-note">Add one or more</span><div class="subject-entry"><input id="subjectInput" placeholder="e.g. Data Structures" /><button type="button" class="outline-button" id="addSubject">Add</button></div><div class="subject-chips" id="subjectChips"></div></label><button class="primary-button full-button" type="submit" id="saveClassButton">Save class</button></form></div></div>
-  <script src="app.js?v=subject-gradebook-xlsx-1"></script>
+  <script src="app.js?v=real-overall-average-1"></script>
 </body>
 </html>

@@ -1,0 +1,24 @@
+#authView[hidden], #appShell[hidden] { display: none; }
+.auth-screen { min-height: 100vh; display: grid; place-items: center; padding: 24px; background: radial-gradient(ellipse at 15% 12%, rgba(94, 230, 220, .09), transparent 34%), #0b0f14; }
+.auth-panel { width: min(100%, 420px); padding: 34px; border: 1px solid #27303b; border-radius: 10px; background: #11161d; box-shadow: 0 24px 70px rgba(0, 0, 0, .32); }
+.auth-brand { display: flex; align-items: center; gap: 10px; margin-bottom: 38px; font: 700 16px 'Space Grotesk', sans-serif; }
+.auth-brand .brand-mark { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; background: var(--cyan); color: #0b2526; }
+.auth-panel .eyebrow { margin: 0 0 10px; color: var(--cyan); }
+.auth-panel h1 { margin: 0; font: 600 27px 'Space Grotesk', sans-serif; }
+.auth-description { margin: 9px 0 27px; color: var(--muted); line-height: 1.5; }
+.auth-panel form { display: grid; gap: 9px; }
+.auth-signup-fields { display: grid; gap: 9px; }
+.auth-signup-fields[hidden] { display: none; }
+.auth-panel label { margin-top: 8px; color: #cbd2da; font-size: 12px; font-weight: 600; }
+.auth-panel input { width: 100%; min-height: 44px; border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; background: #0b0f14; color: var(--text); outline: none; }
+.auth-panel input:focus { border-color: var(--cyan); box-shadow: 0 0 0 3px rgba(94, 230, 220, .12); }
+.auth-message { min-height: 18px; margin: 3px 0 0; color: #ff9a9a; font-size: 12px; line-height: 1.45; }
+.auth-submit { min-height: 44px; border: 0; border-radius: 6px; background: var(--cyan); color: #0b292a; font-weight: 700; }
+.auth-submit:hover { background: #83eee6; }
+.auth-submit:disabled { cursor: wait; opacity: .65; }
+.auth-mode-toggle { display: block; margin: 18px auto 0; border: 0; background: transparent; color: #aeb8c3; font-size: 12px; text-decoration: underline; text-underline-offset: 3px; }
+.account-menu-profile { margin-top: 16px; padding: 15px 13px 8px; border-top: 1px solid var(--border); }
+.account-menu-email { display: block; overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.account-signout-item { color: #ff9a9a !important; }
+.account-signout-item .nav-icon { color: inherit; }
+@media (max-width: 520px) { .auth-panel { padding: 25px 21px; } .auth-brand { margin-bottom: 30px; } .account-menu-profile { margin-top: 10px; } }

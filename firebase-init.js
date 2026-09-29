@@ -1,6 +1,7 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js';
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, updateProfile, setPersistence, browserLocalPersistence } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js';
 import { getAnalytics } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-analytics.js';
-import { getFirestore, doc, setDoc, getDoc, collection, getDocs, deleteDoc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
+import { getFirestore, doc, setDoc, collection, getDocs, deleteDoc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
 
 const firebaseConfig = {
   apiKey: 'AIzaSyD4WIopXknWxBaZy9_yKvB0Z96RCXcpT8U',
@@ -13,29 +14,37 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
 const db = getFirestore(app);
+async function createAccount(email, password, givenName, surname) {
+  await setPersistence(auth, browserLocalPersistence);
+  const credential = await createUserWithEmailAndPassword(auth, email, password);
+  await updateProfile(credential.user, { displayName: `${givenName} ${surname}`.trim() });
+  return credential;
+}
+async function signIn(email, password) {
+  await setPersistence(auth, browserLocalPersistence);
+  return signInWithEmailAndPassword(auth, email, password);
+}
 let analytics = null;
 try {
   analytics = getAnalytics(app);
 } catch (error) {
   console.info('Firebase Analytics will activate when served from a web origin.');
 }
-async function saveStudentPulseClasses(classes) {
-  const legacySnapshot = await getDoc(doc(db, 'studentPulse', 'classData'));
-  const legacyClasses = legacySnapshot.exists() && Array.isArray(legacySnapshot.data().classes) ? legacySnapshot.data().classes : [];
-  const legacyAssessmentCount = legacyClasses.reduce((count, classItem) => count + (classItem.students || []).reduce((studentCount, student) => studentCount + (student.assessments || []).length, 0), 0);
-  const currentAssessmentCount = classes.reduce((count, classItem) => count + (classItem.students || []).reduce((studentCount, student) => studentCount + (student.assessments || []).length, 0), 0);
-  await setDoc(doc(db, 'studentPulse', 'classData'), {
-    classes,
-    updatedAt: serverTimestamp()
-  });
+async function saveStudentPulseClasses(userId, classes) {
+  const classCollection = collection(db, 'users', userId, 'studentPulseClasses');
+  const existingClasses = await getDocs(classCollection);
+  const classIds = new Set(classes.map((classItem) => String(classItem.id)));
+  await Promise.all(existingClasses.docs.filter((snapshot) => !classIds.has(snapshot.id)).map((snapshot) => deleteClassDocument(snapshot.ref)));
   await Promise.all(classes.map(async (classItem) => {
     const students = classItem.students || [];
-    const studentCollection = collection(db, 'studentPulseClasses', classItem.id, 'students');
+    const classRef = doc(classCollection, String(classItem.id));
+    const studentCollection = collection(classRef, 'students');
     const existingStudents = await getDocs(studentCollection);
     const currentStudentIds = new Set(students.map((student, index) => getStudentDocumentId(student, index)));
     await Promise.all(existingStudents.docs.filter((snapshot) => !currentStudentIds.has(snapshot.id)).map((snapshot) => deleteStudentDocument(snapshot.ref)));
-    await setDoc(doc(db, 'studentPulseClasses', classItem.id), {
+    await setDoc(classRef, {
       id: classItem.id,
       recordType: 'class',
       course: classItem.course,
@@ -65,7 +74,12 @@ async function saveStudentPulseClasses(classes) {
       })));
     }));
   }));
-  if (!legacyAssessmentCount || legacyAssessmentCount <= currentAssessmentCount) await deleteDoc(doc(db, 'studentPulse', 'classData'));
+}
+
+async function deleteClassDocument(classRef) {
+  const students = await getDocs(collection(classRef, 'students'));
+  await Promise.all(students.docs.map((snapshot) => deleteStudentDocument(snapshot.ref)));
+  await deleteDoc(classRef);
 }
 
 async function deleteStudentDocument(studentRef) {
@@ -74,11 +88,12 @@ async function deleteStudentDocument(studentRef) {
   await deleteDoc(studentRef);
 }
 
-async function loadStudentPulseClasses() {
-  const classSnapshots = await getDocs(collection(db, 'studentPulseClasses'));
-  if (classSnapshots.docs.length) return Promise.all(classSnapshots.docs.map(async (classSnapshot) => {
+async function loadStudentPulseClasses(userId) {
+  const classSnapshots = await getDocs(collection(db, 'users', userId, 'studentPulseClasses'));
+  if (!classSnapshots.docs.length) return null;
+  return Promise.all(classSnapshots.docs.map(async (classSnapshot) => {
     const classData = classSnapshot.data();
-    const studentSnapshots = await getDocs(collection(db, 'studentPulseClasses', classSnapshot.id, 'students'));
+    const studentSnapshots = await getDocs(collection(classSnapshot.ref, 'students'));
     if (!studentSnapshots.docs.length && Array.isArray(classData.students)) return classData;
     const students = await Promise.all(studentSnapshots.docs.map(async (studentSnapshot) => {
       const assessmentSnapshots = await getDocs(collection(studentSnapshot.ref, 'assessments'));
@@ -86,8 +101,6 @@ async function loadStudentPulseClasses() {
     }));
     return { ...classData, students };
   }));
-  const legacySnapshot = await getDoc(doc(db, 'studentPulse', 'classData'));
-  return legacySnapshot.exists() && Array.isArray(legacySnapshot.data().classes) ? legacySnapshot.data().classes : null;
 }
 
 function getStudentDocumentId(student, index) {
@@ -98,5 +111,16 @@ function getAssessmentDocumentId(index) {
   return `assessment-${String(index).padStart(4, '0')}`;
 }
 
-window.studentPulseFirebase = { app, analytics, db, saveStudentPulseClasses, loadStudentPulseClasses };
+window.studentPulseFirebase = {
+  app,
+  auth,
+  analytics,
+  db,
+  createAccount,
+  signIn,
+  signOut: () => signOut(auth),
+  onAuthStateChanged: (callback, onError) => onAuthStateChanged(auth, callback, onError),
+  saveStudentPulseClasses,
+  loadStudentPulseClasses
+};
 window.dispatchEvent(new CustomEvent('studentpulse:firebase-ready'));
