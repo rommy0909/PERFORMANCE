@@ -181,6 +181,7 @@ function getStudentInitials(student) {
   if (parts.length >= 2) return `${parts[0].charAt(0)}${parts[parts.length - 1].charAt(0)}`.toUpperCase();
   return displayText.slice(0, 2).toUpperCase();
 }
+function getStudentDisplayName(student) { return String(student?.surname ? `${student.surname}, ${student.name}` : student?.displayName || student?.name || '').trim(); }
 function titleCase(value) { return value.trim().toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase()); }
 function normalizeSubject(value) { return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase(); }
 function getScorePercentage(assessment) {
@@ -191,7 +192,7 @@ function getScorePercentage(assessment) {
 }
 function getAssessmentKey(assessment) {
   return [
-    assessment?.title,
+    String(assessment?.title || '').replace(/\s*[-:–—]?\s*\(?\s*out of\s+\d+(?:,\d{3})*(?:\.\d+)?\s*(?:points?|pts?|items?)?\s*\)?\s*$/i, ''),
     normalizeSubject(assessment?.subject),
     assessment?.type,
     normalizePeriod(assessment?.period)
@@ -574,7 +575,7 @@ function sortStudentsForRoster(students, mode = 'average-desc') {
 }
 function getAssessmentSortValue(assessment) { const dateTime = assessment.dateTime || assessment.date || ''; const time = assessment.time || '00:00'; const candidate = dateTime.includes('T') ? dateTime : `${dateTime}T${time}`; const parsed = new Date(candidate); return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime(); }
 function formatAssessmentTitle(value) { return titleCase(value || ''); }
-function getAssessmentDisplayName(item) { const type = titleCase(item.type || 'Assessment'); const title = formatAssessmentTitle(item.title); const period = getPeriodLabel(item.period || 'overall'); return title ? `${type} ${title}` : `${type} · ${period}`; }
+function getAssessmentDisplayName(item) { const type = titleCase(item.type || 'Assessment'); const title = formatAssessmentTitle(item.title).replace(new RegExp(`^${type}(?=$|\\s|[-:])(?:[-:]\\s*|\\s+)?`, 'i'), ''); const period = getPeriodLabel(item.period || 'overall'); return title ? `${type} ${title}` : `${type} · ${period}`; }
 const PERIOD_LABELS = { overall: 'Semester', prelim: 'Prelim', midterm: 'Midterm', semifinal: 'Semi Finals', final: 'Finals' };
 function normalizePeriod(value) {
   const raw = String(value || '').trim().toLowerCase().replace(/[_\-\s]+/g, '');
@@ -628,7 +629,7 @@ function renderReports() {
   $('#reportClassMeta').textContent = `${activeClass.subjects.length} subjects · ${activeClass.students.length} students · ${completed} assessments`;
   $('#reportMetrics').innerHTML = `<article class="report-metric"><span>Class average</span><strong>${classAverage.toFixed(1)}%</strong><small>Based on scores</small></article><article class="report-metric"><span>Total students</span><strong>${activeClass.students.length}</strong><small>Enrolled in this class</small></article><article class="report-metric"><span>Assessments</span><strong>${completed}</strong><small>Across all students</small></article><article class="report-metric"><span>Subjects</span><strong>${activeClass.subjects.length}</strong><small>Configured for this class</small></article>`;
   $('#reportSubjects').innerHTML = activeClass.subjects.map((subject) => { const expected = uniqueAssessments.filter((item) => normalizeSubject(item.subject) === normalizeSubject(subject)); const average = Math.round(students.length ? students.reduce((sum, student) => sum + getAssessmentAverage(student.assessments.filter((item) => normalizeSubject(item.subject) === normalizeSubject(subject)), expected), 0) / students.length : 0); return `<div class="report-subject-row"><div class="report-subject-label"><span>${subject}</span><strong>${average}%</strong></div><div class="report-progress"><span style="width:${average}%"></span></div></div>`; }).join('') || '<p class="muted">No subjects configured.</p>';
-  $('#reportCompletion').innerHTML = students.map((student) => { const completedByStudent = getUniqueAssessments(student.assessments).length; const missing = getMissingAssessments(student, uniqueAssessments); const progress = completed ? Math.min(completedByStudent / completed * 100, 100) : 0; const studentKey = student.name.replace(/"/g, '&quot;'); return `<div class="report-completion-row"><div class="report-completion-label"><span>${student.displayName || student.name}</span><strong>${completedByStudent}/${completed}</strong><button class="completion-help-button" type="button" data-completion-student="${studentKey}" aria-label="Show missing assessments" title="Show missing assessments">?</button></div><div class="report-progress"><span style="width:${progress}%"></span></div></div>`; }).join('') || '<p class="muted">No students added.</p>';
+  $('#reportCompletion').innerHTML = students.map((student) => { const completedByStudent = getUniqueAssessments(student.assessments).length; const missing = getMissingAssessments(student, uniqueAssessments); const progress = completed ? Math.min(completedByStudent / completed * 100, 100) : 0; const studentKey = getStudentDisplayName(student).replace(/"/g, '&quot;'); return `<div class="report-completion-row"><div class="report-completion-label"><span>${getStudentDisplayName(student)}</span><strong>${completedByStudent}/${completed}</strong><button class="completion-help-button" type="button" data-completion-student="${studentKey}" aria-label="Show missing assessments" title="Show missing assessments">?</button></div><div class="report-progress"><span style="width:${progress}%"></span></div></div>`; }).join('') || '<p class="muted">No students added.</p>';
   const completionSubtitle = document.querySelector('.report-completion-panel .muted');
   if (completionSubtitle) completionSubtitle.textContent = 'Student assessment progress';
   $('#reportRanking').innerHTML = students.sort((a, b) => b.average - a.average).slice(0, 3).map((student, index) => `<div class="report-rank-card"><span class="rank-number">${index + 1}</span><span class="avatar card-avatar">${student.initials}</span><span class="report-rank-copy"><strong>${student.displayName || student.name}</strong><small>${getUniqueAssessments(student.assessments).length} assessments</small></span><strong class="report-rank-score">${student.average.toFixed(1)}%</strong></div>`).join('') || '<p class="muted">No students added.</p>';
@@ -741,23 +742,24 @@ function configureAssessmentPeriodFilter() {
 function renderAssessmentStudentSelect(student = selectedStudent) {
   const studentSelect = $('#assessmentStudent');
   if (!studentSelect) return;
-  studentSelect.innerHTML = sortStudentsAlphabetically(activeClass.students).map((item) => `<option value="${item.name}">${item.displayName || item.name}</option>`).join('');
-  if (student && activeClass.students.some((item) => item.name === student.name)) studentSelect.value = student.name;
+  studentSelect.innerHTML = sortStudentsAlphabetically(activeClass.students).map((item) => `<option value="${getStudentDisplayName(item)}">${getStudentDisplayName(item)}</option>`).join('');
+  if (student && activeClass.students.some((item) => getStudentDisplayName(item) === getStudentDisplayName(student))) studentSelect.value = getStudentDisplayName(student);
   studentSelect.disabled = Boolean(editingAssessment);
 }
 
 function renderStudentSelect() {
   const hasClass = classes.length > 0;
+  const isOverview = $('.nav-item[data-view="overview"]')?.classList.contains('active');
   document.querySelectorAll('#overviewView > *').forEach((section) => { section.hidden = hasClass ? section.id === 'noClassesPanel' : section.id !== 'noClassesPanel'; });
-  document.querySelector('.active-class-banner').hidden = !hasClass;
-  document.querySelector('.class-picker-strip').hidden = !hasClass;
-  $('#studentStrip').hidden = !hasClass || activeClass.students.length === 0;
+  document.querySelector('.active-class-banner').hidden = !hasClass || !isOverview;
+  document.querySelector('.class-picker-strip').hidden = !hasClass || !isOverview;
+  $('#studentStrip').hidden = !hasClass || !isOverview || activeClass.students.length === 0;
   $('#classEmptyPanel').hidden = !hasClass || activeClass.students.length > 0;
   $('#rosterPanel').hidden = !hasClass || activeClass.students.length === 0;
   $('#activeClassBannerMeta').textContent = `${activeClass.subjects.length} subjects · ${activeClass.students.length} students tracked`;
   $('#studentClassContext').textContent = `Adding to ${classLabel(activeClass)}`;
-  $('#studentSelect').innerHTML = sortStudentsAlphabetically(activeClass.students).map((student) => `<option value="${student.name}">${student.displayName || student.name}</option>`).join('');
-  if (selectedStudent && activeClass.students.some((student) => student.name === selectedStudent.name)) $('#studentSelect').value = selectedStudent.name;
+  $('#studentSelect').innerHTML = sortStudentsAlphabetically(activeClass.students).map((student) => `<option value="${getStudentDisplayName(student)}">${getStudentDisplayName(student)}</option>`).join('');
+  if (selectedStudent && activeClass.students.some((student) => getStudentDisplayName(student) === getStudentDisplayName(selectedStudent))) $('#studentSelect').value = getStudentDisplayName(selectedStudent);
   else selectedStudent = activeClass.students[0] || null;
   renderSelectedStudent();
   renderTopStudents();
@@ -861,10 +863,10 @@ function renderStudentCards() {
   $('#studentCards').innerHTML = sortStudentsForRoster(activeClass.students, sortMode).map((student) => {
     const assessmentCount = getUniqueAssessments(student.assessments).length;
     const average = assessmentCount ? Math.round(getStudentAverage(student)) : 0;
-    const selected = selectedStudent && selectedStudent.name === student.name ? ' selected-card' : '';
+    const selected = selectedStudent === student ? ' selected-card' : '';
     const middleNameText = student.middleName ? student.middleName : 'No middle name';
     const genderText = student.gender || 'Male';
-    return `<button class="student-card${selected}" data-student="${student.name}"><span class="avatar card-avatar">${student.initials}</span><span class="student-card-copy"><strong>${student.displayName}</strong><small>${middleNameText} · ${genderText} · ${assessmentCount} assessment${assessmentCount === 1 ? '' : 's'}</small></span><strong class="card-average">${average}%</strong><span class="top-arrow">→</span></button>`;
+    return `<button class="student-card${selected}" data-student="${getStudentDisplayName(student)}"><span class="avatar card-avatar">${student.initials}</span><span class="student-card-copy"><strong>${getStudentDisplayName(student)}</strong><small>${middleNameText} · ${genderText} · ${assessmentCount} assessment${assessmentCount === 1 ? '' : 's'}</small></span><strong class="card-average">${average}%</strong><span class="top-arrow">→</span></button>`;
   }).join('');
 }
 
@@ -922,9 +924,9 @@ function renderTopStudents() {
 
 function renderSelectedStudent() {
   if (selectedStudent) {
-    $('#studentSelect').value = selectedStudent.name;
+    $('#studentSelect').value = getStudentDisplayName(selectedStudent);
     $('.avatar-large').textContent = selectedStudent.initials;
-    $('.student-name').innerHTML = `${selectedStudent.name} <span class="verified">✓</span>`;
+    $('.student-name').innerHTML = `${getStudentDisplayName(selectedStudent)} <span class="verified">✓</span>`;
     $('#selectedStudentMeta').textContent = classLabel(activeClass);
   }
   const assessmentCount = selectedStudent ? getUniqueAssessments(selectedStudent.assessments).length : 0;
@@ -1054,7 +1056,7 @@ function renderTrendChart() {
 }
 
 function renderAssessmentRows() {
-  const rows = selectedStudent ? getUniqueAssessmentEntries(selectedStudent.assessments).map(({ assessment, index }) => ({ ...assessment, student: selectedStudent.name, assessmentIndex: index })) : [];
+  const rows = selectedStudent ? getUniqueAssessmentEntries(selectedStudent.assessments).map(({ assessment, index }) => ({ ...assessment, student: getStudentDisplayName(selectedStudent), assessmentIndex: index })) : [];
   const assessmentStudentLabel = $('#assessmentStudentLabel');
   if (assessmentStudentLabel) assessmentStudentLabel.textContent = selectedStudent ? `Latest scores for ${selectedStudent.displayName || selectedStudent.name}` : 'Select a student to view assessments';
   configureAssessmentPeriodFilter();
@@ -1142,7 +1144,7 @@ function closeAllAssessmentsView() {
 function syncAssessmentTitleRequirement() { const type = $('#assessmentType'); const title = $('#assessmentTitle'); if (!type || !title) return; const isExam = type.value.toLowerCase() === 'exam'; title.required = !isExam; title.placeholder = isExam ? 'Optional for exams' : 'e.g. Quiz 1 or Capstone Project'; }
 function validateAssessmentScore() { const score = $('#assessmentScore'); const total = $('#assessmentTotal'); const warning = $('#scoreWarning'); if (!score || !total || !warning) return true; const invalid = score.value !== '' && total.value !== '' && Number(score.value) > Number(total.value); warning.hidden = !invalid; score.setCustomValidity(invalid ? 'Score cannot be greater than Out of.' : ''); return !invalid; }
 function openAssessmentModal() { editingAssessment = null; renderSubjects(); $('#assessmentModalTitle').textContent = 'Add assessment'; $('#saveAssessmentButton').textContent = 'Save assessment'; $('#deleteAssessmentButton').hidden = true; $('#assessmentForm').reset(); renderAssessmentStudentSelect(); $('#assessmentForm').elements.date.value = localDateValue(); $('#assessmentForm').elements.time.value = localTimeValue(); syncAssessmentTitleRequirement(); modalBackdrop.hidden = false; }
-function openEditAssessment(studentName, assessmentIndex) { const student = activeClass.students.find((item) => item.name === studentName); const assessment = student?.assessments[assessmentIndex]; if (!assessment) return; editingAssessment = { student, assessment }; renderSubjects(); renderAssessmentStudentSelect(student); $('#assessmentModalTitle').textContent = 'Edit assessment'; $('#saveAssessmentButton').textContent = 'Save changes'; $('#deleteAssessmentButton').hidden = false; $('#assessmentForm').elements.title.value = assessment.title || ''; $('#assessmentForm').elements.subject.value = assessment.subject || activeClass.subjects[0]; $('#assessmentForm').elements.type.value = assessment.type || 'Quiz'; $('#assessmentForm').elements.period.value = assessment.period || 'Prelim'; $('#assessmentForm').elements.score.value = assessment.score; $('#assessmentForm').elements.total.value = assessment.total; $('#assessmentForm').elements.date.value = assessment.date || localDateValue(); $('#assessmentForm').elements.time.value = assessment.time || localTimeValue(); syncAssessmentTitleRequirement(); validateAssessmentScore(); modalBackdrop.hidden = false; }
+function openEditAssessment(studentName, assessmentIndex) { const student = activeClass.students.find((item) => getStudentDisplayName(item) === studentName); const assessment = student?.assessments[assessmentIndex]; if (!assessment) return; editingAssessment = { student, assessment }; renderSubjects(); renderAssessmentStudentSelect(student); $('#assessmentModalTitle').textContent = 'Edit assessment'; $('#saveAssessmentButton').textContent = 'Save changes'; $('#deleteAssessmentButton').hidden = false; $('#assessmentForm').elements.title.value = assessment.title || ''; $('#assessmentForm').elements.subject.value = assessment.subject || activeClass.subjects[0]; $('#assessmentForm').elements.type.value = assessment.type || 'Quiz'; $('#assessmentForm').elements.period.value = assessment.period || 'Prelim'; $('#assessmentForm').elements.score.value = assessment.score; $('#assessmentForm').elements.total.value = assessment.total; $('#assessmentForm').elements.date.value = assessment.date || localDateValue(); $('#assessmentForm').elements.time.value = assessment.time || localTimeValue(); syncAssessmentTitleRequirement(); validateAssessmentScore(); modalBackdrop.hidden = false; }
 function closeAllModals() { modalBackdrop.hidden = true; studentModalBackdrop.hidden = true; classModalBackdrop.hidden = true; }
 
 function arrangeOverviewSections() {
@@ -1213,7 +1215,7 @@ $('#reportSubjectMenu').addEventListener('click', () => {
 $('#reportCompletion').addEventListener('click', (event) => {
   const button = event.target.closest('[data-completion-student]');
   if (!button || !completionBackdrop) return;
-  const student = activeClass.students.find((item) => item.name === button.dataset.completionStudent);
+  const student = activeClass.students.find((item) => getStudentDisplayName(item) === button.dataset.completionStudent);
   if (!student) return;
   const allAssessments = getUniqueAssessments(activeClass.students.flatMap((item) => item.assessments));
   const missing = getMissingAssessments(student, allAssessments);
@@ -1233,8 +1235,8 @@ $('#subjectPerformanceList').addEventListener('click', (event) => {
   $('#missingAssessmentList').innerHTML = missing.map((assessment) => { const type = titleCase(assessment.type || 'Assessment'); const title = assessment.title ? formatAssessmentTitle(assessment.title) : `${getPeriodLabel(assessment.period)} Exam`; return `<div class="missing-assessment-item"><div><div class="missing-assessment-heading"><span class="missing-assessment-type">${type}</span><strong>${title}</strong></div><small>${assessment.subject} · ${getPeriodLabel(assessment.period)}</small></div></div>`; }).join('');
   completionBackdrop.hidden = false;
 });
-$('#studentSelect').addEventListener('change', (event) => { selectedStudent = activeClass.students.find((student) => student.name === event.target.value); renderSelectedStudent(); renderSubjectPerformance(); renderOverviewCompletion(); showToast(`${selectedStudent.name}'s profile loaded.`); });
-$('#assessmentStudent').addEventListener('change', (event) => { const student = activeClass.students.find((item) => item.name === event.target.value); if (!student || editingAssessment) return; selectedStudent = student; renderSelectedStudent(); renderSubjectPerformance(); });
+$('#studentSelect').addEventListener('change', (event) => { selectedStudent = activeClass.students.find((student) => getStudentDisplayName(student) === event.target.value); renderSelectedStudent(); renderSubjectPerformance(); renderOverviewCompletion(); showToast(`${selectedStudent.name}'s profile loaded.`); });
+$('#assessmentStudent').addEventListener('change', (event) => { const student = activeClass.students.find((item) => getStudentDisplayName(item) === event.target.value); if (!student || editingAssessment) return; selectedStudent = student; renderSelectedStudent(); renderSubjectPerformance(); });
 $('#assessmentType').addEventListener('change', syncAssessmentTitleRequirement);
 $('#assessmentScore').addEventListener('input', validateAssessmentScore);
 $('#assessmentTotal').addEventListener('input', validateAssessmentScore);
@@ -1323,7 +1325,7 @@ $('#backToOverview').addEventListener('click', closeAllAssessmentsView);
 $('#addSubject').addEventListener('click', () => { const input = $('#subjectInput'); const subject = input.value.trim(); if (!subject || pendingSubjects.includes(subject)) return; pendingSubjects.push(subject); $('#subjectChips').innerHTML = pendingSubjects.map((item) => `<span class="subject-chip">${item}<button type="button" data-subject="${item}">×</button></span>`).join(''); input.value = ''; });
 $('#subjectChips').addEventListener('click', (event) => { if (event.target.matches('button')) { pendingSubjects = pendingSubjects.filter((item) => item !== event.target.dataset.subject); event.target.parentElement.remove(); } });
 $('#rosterSort')?.addEventListener('change', () => renderStudentCards());
-$('#studentCards').addEventListener('click', (event) => { const card = event.target.closest('.student-card'); if (!card) return; selectedStudent = activeClass.students.find((student) => student.name === card.dataset.student); renderStudentSelect(); renderSubjectPerformance(); showToast(`${selectedStudent.name}'s profile loaded.`); });
+$('#studentCards').addEventListener('click', (event) => { const card = event.target.closest('.student-card'); if (!card) return; selectedStudent = activeClass.students.find((student) => getStudentDisplayName(student) === card.dataset.student); renderStudentSelect(); renderSubjectPerformance(); showToast(`${selectedStudent.name}'s profile loaded.`); });
 assessmentRows.addEventListener('click', (event) => { const button = event.target.closest('.edit-assessment'); if (!button) return; openEditAssessment(button.dataset.student, Number(button.dataset.assessmentIndex)); });
 
 $('#classCards').addEventListener('click', (event) => { const action = event.target.dataset.action; const id = event.target.dataset.id; if (!action) return; const item = classes.find((entry) => entry.id === id); if (action === 'edit') openClassForm(item); if (action === 'delete' && confirm(`Delete ${classLabel(item)}?`)) { classes = classes.filter((entry) => entry.id !== id); activeClass = classes[0] || { id: 'empty', course: 'No class', year: '', section: '', subjects: [], students: [] }; selectedStudent = activeClass.students[0] || null; saveClasses(); refreshActiveClassViews(); showToast('Class deleted.'); } });
@@ -1366,8 +1368,8 @@ $('#assessmentForm').addEventListener('submit', (event) => {
   event.preventDefault();
   if (!validateAssessmentScore()) { showToast('Score cannot be greater than Out of.'); return; }
   const form = new FormData(event.target);
-  const studentName = form.get('student') || $('#assessmentStudent')?.value;
-  const targetStudent = editingAssessment?.student || activeClass.students.find((student) => student.name === studentName);
+  const studentDisplayName = form.get('student') || $('#assessmentStudent')?.value;
+  const targetStudent = editingAssessment?.student || activeClass.students.find((student) => getStudentDisplayName(student) === studentDisplayName);
   if (!targetStudent) return showToast('Choose a student before recording an assessment.');
 
   const total = Number(form.get('total'));
@@ -1395,7 +1397,7 @@ $('#assessmentForm').addEventListener('submit', (event) => {
     return;
   }
   if (duplicate) {
-    const assessmentTitle = updatedAssessment.title || getAssessmentDisplayName(updatedAssessment);
+    const assessmentTitle = getAssessmentDisplayName(updatedAssessment);
     const shouldUpdate = window.confirm(`${assessmentTitle} for ${updatedAssessment.subject} · ${getPeriodLabel(updatedAssessment.period)} is already recorded for ${targetStudent.displayName || targetStudent.name} (${duplicate.score} / ${duplicate.total}). Update that record to ${score} / ${total}?`);
     if (!shouldUpdate) return;
     Object.assign(duplicate, updatedAssessment);

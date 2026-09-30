@@ -9,6 +9,10 @@
   min-width: 0;
 }
 
+.analytics-grid {
+  margin-bottom: 16px;
+}
+
 .assessment-record-header {
   display: flex;
   align-items: flex-start;
